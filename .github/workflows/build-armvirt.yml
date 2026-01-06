@@ -15,6 +15,7 @@ on:
     branches:
       - main
       - master
+      - fanchmwrt-24.10.4
     paths:
       - '.github/workflows/build-armvirt.yml'
       - 'target/linux/armsr/**'
