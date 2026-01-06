@@ -1,0 +1,174 @@
+name: Build ARM Virtual Machine Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target architecture'
+        required: false
+        default: 'armsr/armv8'
+        type: choice
+        options:
+          - armsr/armv8
+          - armsr/armv7
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - '.github/workflows/build-armvirt.yml'
+      - 'target/linux/armsr/**'
+      - 'package/**'
+      - 'config/**'
+  pull_request:
+    paths:
+      - '.github/workflows/build-armvirt.yml'
+      - 'target/linux/armsr/**'
+      - 'package/**'
+      - 'config/**'
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build ARM Virtual Machine Firmware
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            binutils \
+            bzip2 \
+            diff \
+            find \
+            flex \
+            gawk \
+            gcc \
+            g++ \
+            getopt \
+            grep \
+            install \
+            libc-dev \
+            libz-dev \
+            make \
+            perl \
+            python3 \
+            rsync \
+            subversion \
+            unzip \
+            which \
+            wget \
+            curl \
+            git \
+            file \
+            gcc-multilib \
+            g++-multilib \
+            libncurses5-dev \
+            libncursesw5-dev \
+            zlib1g-dev
+
+      - name: Update feeds
+        run: |
+          ./scripts/feeds update -a
+
+      - name: Install feeds
+        run: |
+          ./scripts/feeds install -a
+
+      - name: Configure build
+        run: |
+          # 设置目标为 ARM 虚拟机
+          TARGET="${{ github.event.inputs.target || 'armsr/armv8' }}"
+          TARGET_ARCH=$(echo $TARGET | cut -d'/' -f1)
+          TARGET_SUBTARGET=$(echo $TARGET | cut -d'/' -f2)
+          
+          echo "Configuring for target: $TARGET_ARCH/$TARGET_SUBTARGET"
+          
+          # 先运行 defconfig 生成基础配置
+          make defconfig
+          
+          # 使用 sed 修改配置以启用 gzip 压缩
+          if grep -q "# CONFIG_TARGET_IMAGES_GZIP is not set" .config; then
+            sed -i 's/# CONFIG_TARGET_IMAGES_GZIP is not set/CONFIG_TARGET_IMAGES_GZIP=y/' .config
+          elif ! grep -q "CONFIG_TARGET_IMAGES_GZIP=y" .config; then
+            echo "CONFIG_TARGET_IMAGES_GZIP=y" >> .config
+          fi
+          
+          # 设置根文件系统分区大小（512MB）
+          if grep -q "CONFIG_TARGET_ROOTFS_PARTSIZE=" .config; then
+            sed -i 's/CONFIG_TARGET_ROOTFS_PARTSIZE=.*/CONFIG_TARGET_ROOTFS_PARTSIZE=512/' .config
+          else
+            echo "CONFIG_TARGET_ROOTFS_PARTSIZE=512" >> .config
+          fi
+          
+          # 设置内核分区大小（64MB）
+          if grep -q "CONFIG_TARGET_KERNEL_PARTSIZE=" .config; then
+            sed -i 's/CONFIG_TARGET_KERNEL_PARTSIZE=.*/CONFIG_TARGET_KERNEL_PARTSIZE=64/' .config
+          else
+            echo "CONFIG_TARGET_KERNEL_PARTSIZE=64" >> .config
+          fi
+          
+          # 确保选择了 generic 设备（使用变量替换）
+          GENERIC_CONFIG="CONFIG_TARGET_${TARGET_ARCH}_${TARGET_SUBTARGET}_generic"
+          if grep -q "# ${GENERIC_CONFIG} is not set" .config; then
+            sed -i "s/# ${GENERIC_CONFIG} is not set/${GENERIC_CONFIG}=y/" .config
+          elif ! grep -q "${GENERIC_CONFIG}=y" .config; then
+            echo "${GENERIC_CONFIG}=y" >> .config
+          fi
+          
+          # 重新运行 defconfig 以应用所有依赖配置
+          make defconfig
+          
+          # 显示关键配置
+          echo "=== Key configuration ==="
+          grep -E "CONFIG_TARGET_|CONFIG_TARGET_IMAGES_GZIP" .config | head -10 || true
+
+      - name: Build firmware
+        run: |
+          # 使用多核编译加速
+          make -j$(nproc) V=s
+
+      - name: List build artifacts
+        run: |
+          echo "=== Build artifacts ==="
+          find bin/targets -name "*.img.gz" -o -name "*.img" | head -20 || true
+          echo "=== Build directory structure ==="
+          ls -la bin/targets/ || true
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ github.event.inputs.target || 'armsr-armv8' }}-${{ github.sha }}
+          path: |
+            bin/targets/**/*.img.gz
+            bin/targets/**/*.img
+            bin/targets/**/*.buildinfo
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload build logs
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-logs-${{ github.sha }}
+          path: |
+            logs/
+            **/*.log
+          retention-days: 7
+          if-no-files-found: ignore
+
