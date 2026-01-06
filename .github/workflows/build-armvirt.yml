@@ -162,11 +162,11 @@ jobs:
           if [ "$TARGET_SUBTARGET" = "armv8" ]; then
             echo "CONFIG_TARGET_armsr=y" > .config
             echo "CONFIG_TARGET_armsr_armv8=y" >> .config
-            echo "CONFIG_TARGET_DEVICE_armsr_armv8_generic=y" >> .config
+            echo "CONFIG_TARGET_DEVICE_armsr_armv8_DEVICE_generic=y" >> .config
           else
             echo "CONFIG_TARGET_armsr=y" > .config
             echo "CONFIG_TARGET_armsr_armv7=y" >> .config
-            echo "CONFIG_TARGET_DEVICE_armsr_armv7_generic=y" >> .config
+            echo "CONFIG_TARGET_DEVICE_armsr_armv7_DEVICE_generic=y" >> .config
           fi
           
           # 运行 defconfig 生成完整配置
@@ -200,7 +200,7 @@ jobs:
           fi
           
           # 确保选择了 generic 设备（使用正确的配置名称）
-          GENERIC_CONFIG="CONFIG_TARGET_DEVICE_${TARGET_ARCH}_${TARGET_SUBTARGET}_generic"
+          GENERIC_CONFIG="CONFIG_TARGET_DEVICE_${TARGET_ARCH}_${TARGET_SUBTARGET}_DEVICE_generic"
           if grep -q "# ${GENERIC_CONFIG} is not set" .config; then
             sed -i "s/# ${GENERIC_CONFIG} is not set/${GENERIC_CONFIG}=y/" .config
           elif ! grep -q "${GENERIC_CONFIG}=y" .config; then
@@ -216,7 +216,7 @@ jobs:
           
           # defconfig 可能会移除某些配置，需要重新确保 generic 设备被选中
           echo "Re-ensuring generic device is selected after defconfig..."
-          GENERIC_CONFIG="CONFIG_TARGET_DEVICE_${TARGET_ARCH}_${TARGET_SUBTARGET}_generic"
+          GENERIC_CONFIG="CONFIG_TARGET_DEVICE_${TARGET_ARCH}_${TARGET_SUBTARGET}_DEVICE_generic"
           if ! grep -q "${GENERIC_CONFIG}=y" .config; then
             echo "Generic config was removed by defconfig, re-adding..."
             # 移除可能存在的禁用标记
@@ -250,8 +250,8 @@ jobs:
               grep "CONFIG_TARGET_armsr_armv8" .config || echo "No CONFIG_TARGET_armsr_armv8 found"
               exit 1
             fi
-            if ! grep -q "CONFIG_TARGET_DEVICE_armsr_armv8_generic=y" .config; then
-              echo "ERROR: CONFIG_TARGET_DEVICE_armsr_armv8_generic=y not found!"
+            if ! grep -q "CONFIG_TARGET_DEVICE_armsr_armv8_DEVICE_generic=y" .config; then
+              echo "ERROR: CONFIG_TARGET_DEVICE_armsr_armv8_DEVICE_generic=y not found!"
               echo "Attempting to debug..."
               echo "Current generic-related configs:"
               grep "generic" .config | head -10 || echo "No generic configs found"
@@ -268,8 +268,8 @@ jobs:
               echo "ERROR: CONFIG_TARGET_armsr_armv7=y not found!"
               exit 1
             fi
-            if ! grep -q "CONFIG_TARGET_DEVICE_armsr_armv7_generic=y" .config; then
-              echo "ERROR: CONFIG_TARGET_DEVICE_armsr_armv7_generic=y not found!"
+            if ! grep -q "CONFIG_TARGET_DEVICE_armsr_armv7_DEVICE_generic=y" .config; then
+              echo "ERROR: CONFIG_TARGET_DEVICE_armsr_armv7_DEVICE_generic=y not found!"
               exit 1
             fi
           fi
