@@ -181,11 +181,37 @@ jobs:
           grep -E "CONFIG_TARGET_armsr|CONFIG_TARGET_IMAGES_GZIP|CONFIG_TARGET_ROOTFS_PARTSIZE|CONFIG_TARGET_KERNEL_PARTSIZE" .config | head -10 || true
           
           # 验证配置
+          echo "=== Verifying configuration ==="
           if ! grep -q "CONFIG_TARGET_armsr=y" .config; then
-            echo "ERROR: Target configuration failed!"
+            echo "ERROR: CONFIG_TARGET_armsr=y not found!"
             exit 1
           fi
           
+          if [ "$TARGET_SUBTARGET" = "armv8" ]; then
+            if ! grep -q "CONFIG_TARGET_armsr_armv8=y" .config; then
+              echo "ERROR: CONFIG_TARGET_armsr_armv8=y not found!"
+              exit 1
+            fi
+            if ! grep -q "CONFIG_TARGET_armsr_armv8_generic=y" .config; then
+              echo "ERROR: CONFIG_TARGET_armsr_armv8_generic=y not found!"
+              exit 1
+            fi
+            # 验证架构（armv8 应该是 aarch64）
+            if ! grep -q "CONFIG_aarch64=y" .config; then
+              echo "WARNING: CONFIG_aarch64=y not found, but this may be set by defconfig"
+            fi
+          else
+            if ! grep -q "CONFIG_TARGET_armsr_armv7=y" .config; then
+              echo "ERROR: CONFIG_TARGET_armsr_armv7=y not found!"
+              exit 1
+            fi
+            if ! grep -q "CONFIG_TARGET_armsr_armv7_generic=y" .config; then
+              echo "ERROR: CONFIG_TARGET_armsr_armv7_generic=y not found!"
+              exit 1
+            fi
+          fi
+          
+          echo "✓ Configuration verification passed!"
           echo "Configuration completed successfully!"
 
       - name: Build firmware
