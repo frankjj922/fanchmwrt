@@ -214,24 +214,49 @@ jobs:
             exit 1
           }
           
+          # defconfig 可能会移除某些配置，需要重新确保 generic 设备被选中
+          echo "Re-ensuring generic device is selected after defconfig..."
+          GENERIC_CONFIG="CONFIG_TARGET_${TARGET_ARCH}_${TARGET_SUBTARGET}_generic"
+          if ! grep -q "${GENERIC_CONFIG}=y" .config; then
+            echo "Generic config was removed by defconfig, re-adding..."
+            # 移除可能存在的禁用标记
+            sed -i "/# ${GENERIC_CONFIG} is not set/d" .config
+            # 添加配置
+            echo "${GENERIC_CONFIG}=y" >> .config
+            # 再次运行 defconfig 以确保依赖正确
+            make defconfig || {
+              echo "Third defconfig failed after re-adding generic config..."
+              exit 1
+            }
+          fi
+          
           # 显示关键配置
           echo "=== Key configuration ==="
-          grep -E "CONFIG_TARGET_armsr|CONFIG_TARGET_IMAGES_GZIP|CONFIG_TARGET_ROOTFS_PARTSIZE|CONFIG_TARGET_KERNEL_PARTSIZE" .config | head -10 || true
+          grep -E "CONFIG_TARGET_armsr|CONFIG_TARGET_IMAGES_GZIP|CONFIG_TARGET_ROOTFS_PARTSIZE|CONFIG_TARGET_KERNEL_PARTSIZE|CONFIG_TARGET.*generic" .config | head -15 || true
           
           # 验证配置
           echo "=== Verifying configuration ==="
           if ! grep -q "CONFIG_TARGET_armsr=y" .config; then
             echo "ERROR: CONFIG_TARGET_armsr=y not found!"
+            echo "Current .config content:"
+            grep "CONFIG_TARGET_armsr" .config || echo "No CONFIG_TARGET_armsr found"
             exit 1
           fi
           
           if [ "$TARGET_SUBTARGET" = "armv8" ]; then
             if ! grep -q "CONFIG_TARGET_armsr_armv8=y" .config; then
               echo "ERROR: CONFIG_TARGET_armsr_armv8=y not found!"
+              echo "Current .config content:"
+              grep "CONFIG_TARGET_armsr_armv8" .config || echo "No CONFIG_TARGET_armsr_armv8 found"
               exit 1
             fi
             if ! grep -q "CONFIG_TARGET_armsr_armv8_generic=y" .config; then
               echo "ERROR: CONFIG_TARGET_armsr_armv8_generic=y not found!"
+              echo "Attempting to debug..."
+              echo "Current generic-related configs:"
+              grep "generic" .config | head -10 || echo "No generic configs found"
+              echo "All armsr_armv8 configs:"
+              grep "armsr_armv8" .config || echo "No armsr_armv8 configs found"
               exit 1
             fi
             # 验证架构（armv8 应该是 aarch64）
