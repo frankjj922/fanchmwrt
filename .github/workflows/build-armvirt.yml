@@ -55,15 +55,13 @@ jobs:
             build-essential \
             binutils \
             bzip2 \
-            diff \
-            find \
+            diffutils \
+            findutils \
             flex \
             gawk \
             gcc \
             g++ \
-            getopt \
             grep \
-            install \
             libc-dev \
             libz-dev \
             make \
@@ -86,7 +84,9 @@ jobs:
             libelf-dev \
             bc \
             cpio \
-            xz-utils
+            xz-utils \
+            util-linux \
+            coreutils
           
           echo "Environment setup completed"
 
