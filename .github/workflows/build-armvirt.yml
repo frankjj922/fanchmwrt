@@ -49,6 +49,7 @@ jobs:
 
       - name: Set up environment
         run: |
+          set -e
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
@@ -80,18 +81,37 @@ jobs:
             g++-multilib \
             libncurses5-dev \
             libncursesw5-dev \
-            zlib1g-dev
+            zlib1g-dev \
+            libssl-dev \
+            libelf-dev \
+            bc \
+            cpio \
+            xz-utils
+          
+          echo "Environment setup completed"
 
       - name: Update feeds
         run: |
-          ./scripts/feeds update -a
+          set -e
+          echo "Updating feeds..."
+          ./scripts/feeds update -a || {
+            echo "Feeds update failed!"
+            exit 1
+          }
 
       - name: Install feeds
         run: |
-          ./scripts/feeds install -a
+          set -e
+          echo "Installing feeds..."
+          ./scripts/feeds install -a || {
+            echo "Feeds install failed!"
+            exit 1
+          }
 
       - name: Configure build
         run: |
+          set -e  # 遇到错误立即退出
+          
           # 设置目标为 ARM 虚拟机
           TARGET="${{ github.event.inputs.target || 'armsr/armv8' }}"
           TARGET_ARCH=$(echo $TARGET | cut -d'/' -f1)
@@ -99,10 +119,28 @@ jobs:
           
           echo "Configuring for target: $TARGET_ARCH/$TARGET_SUBTARGET"
           
-          # 先运行 defconfig 生成基础配置
-          make defconfig
+          # 创建基础配置文件
+          # 首先设置目标架构
+          if [ "$TARGET_SUBTARGET" = "armv8" ]; then
+            echo "CONFIG_TARGET_armsr=y" > .config
+            echo "CONFIG_TARGET_armsr_armv8=y" >> .config
+            echo "CONFIG_TARGET_armsr_armv8_generic=y" >> .config
+          else
+            echo "CONFIG_TARGET_armsr=y" > .config
+            echo "CONFIG_TARGET_armsr_armv7=y" >> .config
+            echo "CONFIG_TARGET_armsr_armv7_generic=y" >> .config
+          fi
           
-          # 使用 sed 修改配置以启用 gzip 压缩
+          # 运行 defconfig 生成完整配置
+          echo "Running defconfig..."
+          make defconfig || {
+            echo "defconfig failed, showing error..."
+            cat .config 2>/dev/null || true
+            exit 1
+          }
+          
+          # 启用 gzip 压缩
+          echo "Enabling gzip compression..."
           if grep -q "# CONFIG_TARGET_IMAGES_GZIP is not set" .config; then
             sed -i 's/# CONFIG_TARGET_IMAGES_GZIP is not set/CONFIG_TARGET_IMAGES_GZIP=y/' .config
           elif ! grep -q "CONFIG_TARGET_IMAGES_GZIP=y" .config; then
@@ -123,7 +161,7 @@ jobs:
             echo "CONFIG_TARGET_KERNEL_PARTSIZE=64" >> .config
           fi
           
-          # 确保选择了 generic 设备（使用变量替换）
+          # 确保选择了 generic 设备
           GENERIC_CONFIG="CONFIG_TARGET_${TARGET_ARCH}_${TARGET_SUBTARGET}_generic"
           if grep -q "# ${GENERIC_CONFIG} is not set" .config; then
             sed -i "s/# ${GENERIC_CONFIG} is not set/${GENERIC_CONFIG}=y/" .config
@@ -132,16 +170,48 @@ jobs:
           fi
           
           # 重新运行 defconfig 以应用所有依赖配置
-          make defconfig
+          echo "Running defconfig again to apply dependencies..."
+          make defconfig || {
+            echo "Second defconfig failed..."
+            exit 1
+          }
           
           # 显示关键配置
           echo "=== Key configuration ==="
-          grep -E "CONFIG_TARGET_|CONFIG_TARGET_IMAGES_GZIP" .config | head -10 || true
+          grep -E "CONFIG_TARGET_armsr|CONFIG_TARGET_IMAGES_GZIP|CONFIG_TARGET_ROOTFS_PARTSIZE|CONFIG_TARGET_KERNEL_PARTSIZE" .config | head -10 || true
+          
+          # 验证配置
+          if ! grep -q "CONFIG_TARGET_armsr=y" .config; then
+            echo "ERROR: Target configuration failed!"
+            exit 1
+          fi
+          
+          echo "Configuration completed successfully!"
 
       - name: Build firmware
         run: |
-          # 使用多核编译加速
-          make -j$(nproc) V=s
+          set -e  # 遇到错误立即退出
+          
+          echo "Starting firmware build..."
+          echo "Available CPU cores: $(nproc)"
+          
+          # 验证配置存在
+          if [ ! -f .config ]; then
+            echo "ERROR: .config file not found!"
+            exit 1
+          fi
+          
+          # 使用多核编译加速，但限制并发数避免内存不足
+          JOBS=$(( $(nproc) > 4 ? 4 : $(nproc) ))
+          echo "Building with $JOBS parallel jobs..."
+          
+          make -j$JOBS V=s 2>&1 | tee build.log || {
+            echo "Build failed! Showing last 100 lines of build.log:"
+            tail -100 build.log || true
+            exit 1
+          }
+          
+          echo "Build completed successfully!"
 
       - name: List build artifacts
         run: |
