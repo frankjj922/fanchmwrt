@@ -39,7 +39,7 @@ jobs:
   build:
     name: Build ARM Virtual Machine Firmware
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
 
     steps:
       - name: Checkout repository
@@ -108,10 +108,34 @@ jobs:
         run: |
           set -e
           echo "Updating feeds..."
-          ./scripts/feeds update -a || {
-            echo "Feeds update failed!"
+          echo "Checking disk space..."
+          df -h
+          
+          # 检查 feeds 脚本是否存在
+          if [ ! -f ./scripts/feeds ]; then
+            echo "ERROR: ./scripts/feeds not found!"
             exit 1
-          }
+          fi
+          
+          # 更新 feeds，增加重试机制
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if ./scripts/feeds update -a; then
+              echo "✓ Feeds updated successfully"
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "⚠ Feeds update failed, retrying ($RETRY_COUNT/$MAX_RETRIES)..."
+                sleep 5
+              else
+                echo "ERROR: Feeds update failed after $MAX_RETRIES attempts!"
+                echo "This might be due to network issues or repository access problems."
+                exit 1
+              fi
+            fi
+          done
 
       - name: Install feeds
         run: |
@@ -235,6 +259,14 @@ jobs:
           echo "Starting firmware build..."
           echo "Available CPU cores: $(nproc)"
           
+          # 检查磁盘空间
+          echo "=== Disk space before build ==="
+          df -h
+          AVAILABLE_SPACE=$(df -BG . | tail -1 | awk '{print $4}' | sed 's/G//')
+          if [ "$AVAILABLE_SPACE" -lt 20 ]; then
+            echo "WARNING: Less than 20GB available space. Build may fail!"
+          fi
+          
           # 验证配置存在
           if [ ! -f .config ]; then
             echo "ERROR: .config file not found!"
@@ -244,14 +276,20 @@ jobs:
           # 使用多核编译加速，但限制并发数避免内存不足
           JOBS=$(( $(nproc) > 4 ? 4 : $(nproc) ))
           echo "Building with $JOBS parallel jobs..."
+          echo "Note: First build may take 1-3 hours due to toolchain compilation"
           
           make -j$JOBS V=s 2>&1 | tee build.log || {
             echo "Build failed! Showing last 100 lines of build.log:"
             tail -100 build.log || true
+            echo ""
+            echo "=== Disk space after build failure ==="
+            df -h
             exit 1
           }
           
           echo "Build completed successfully!"
+          echo "=== Disk space after build ==="
+          df -h
 
       - name: List build artifacts
         run: |
